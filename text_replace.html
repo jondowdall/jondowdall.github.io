@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width" />
+    <title>Replace Text</title>
+    <style>
+        html {
+            font-family: sans-serif;
+            box-sizing: border-box;
+        }
+
+        *,
+        *:before,
+        *:after {
+            box-sizing: inherit;
+        }
+
+        body {
+            margin: 0;
+            width: 100vw;
+            height: 100dvh;
+            padding: 0.25rem;
+            background-color: lightgray;
+            position: relative;
+        }
+
+        textarea {
+            width: 100%;
+            height: 10em;
+            resize: vertical;
+        }
+
+        #output {
+            resize: vertical;
+            overflow: auto;
+            border: 1px inset grey;
+        }
+
+        #input {
+            resize: vertical;
+            overflow: auto;
+            background-color: white;
+            border: 1px inset grey;
+
+        }
+
+        .match {
+            background: yellow;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Simple Text Replacement</h1>
+    <h2>Source Text</h2>
+    <div id="input-controls">
+        <button class="back">&larr;</button>
+        <button class="forward">&rarr;</button>
+    </div>
+    <div id="input"></div>
+    <h2>Pattern</h2>
+    <div id="pattern-controls">
+        <button class="back">&larr;</button>
+        <button class="forward">&rarr;</button>
+    </div>
+    <textarea id="pattern"></textarea>
+    <h2>Replacement Function</h2>
+    <div id="replacer-controls">
+        <button class="back">&larr;</button>
+        <button class="forward">&rarr;</button>
+    </div>
+    <textarea id="replacer"></textarea>
+    <div id="controls">
+        <button id="replace">Replace</button>
+        <button id="use">Use</button>
+        <button id="clear">Clear History</button>
+        Update Live: <input id="update-live" type="checkbox" />
+        <span id="message"></span>
+    </div>
+    <pre id="output"></pre>
+
+    <script>
+        class History {
+            constructor() {
+                this.content = [];
+                this.position = 0;
+            }
+            setContent(content) {
+                this.content = content;
+            }
+            save() {
+                if (this.content[0] === this.content[1]) {
+                    return;
+                }
+                this.content.unshift(this.content[0]);
+                this.position += 1;
+            }
+            back() {
+                if (this.position === 0 && this.content[0] === this.content[1]) {
+                    this.position = 1;
+                }
+                this.position += 1;
+                if (this.position > this.content.length - 1) {
+                    if (this.content[0] === this.content[1]) {
+                        this.position = 1;
+                    } else {
+                        this.position = 0;
+                    }
+                }
+                return this.content[this.position];
+            }
+            forward() {
+                this.position -= 1;
+                if (this.position === 0 && (this.content[0] === this.content[1])) {
+                    this.position -= 1;
+                }
+                if (this.position < 0) {
+                    this.position = this.content.length - 1;
+                }
+                return this.content[this.position];
+            }
+        }
+
+        class StyledInput {
+            constructor(id) {
+                this.node = document.getElementById(id);
+                this._value = '';
+                this.node.contentEditable = true;
+            }
+            get value() {
+                return this.node.innerText;
+            }
+            set value(value) {
+                this._value = value;
+                this.node.innerText = value;
+            }
+            addEventListener(event, action, options) {
+                return this.node.addEventListener(event, action, options);
+            }
+        }
+
+        const inputHistory = new History();
+        const patternHistory = new History();
+        const replacerHistory = new History();
+
+        const inputNode = new StyledInput('input');
+        const patternNode = document.getElementById('pattern');
+        const replacerNode = document.getElementById('replacer');
+        const replaceButton = document.getElementById('replace');
+        const useButton = document.getElementById('use');
+        const clearButton = document.getElementById('clear');
+        const liveNode = document.getElementById('update-live');
+        const messageNode = document.getElementById('message');
+        const outputNode = document.getElementById('output');
+
+
+        const getHTML = (string) => {
+            return string.replaceAll('\n', '<br>').replaceAll('\t', '&#9;');
+        }
+
+        const showMatches = () => {
+            try {
+                const pattern = new RegExp(patternNode.value, 'g');
+                const input = inputNode.value;
+
+                inputNode.node.innerHTML = getHTML(input.replaceAll(pattern, '<span class="match">$&</span>'));
+            } catch(error) {
+                messageNode.innerText = `${error.message} using string replacement`;
+            }
+        }
+
+        const update = () => {
+            messageNode.innerText = '';
+            const input = inputNode.value;
+            const context = { count: -1 };
+            let replacement;
+            try {
+                const replacer = new Function('context', 'match', 'parts', 'offset', 'string',
+                    replacerNode.value);
+                replacer();
+                replacement = (match, ...parts) => {
+                    const [offset, string] = parts.splice(-2, 2);
+                    context.count++;
+                    return replacer(context, match, parts, offset, string);
+                };
+            } catch (error) {
+                messageNode.innerText = `${error.message} using string replacement`;
+                replacement = replacerNode.value;
+            }
+
+            try {
+                const pattern = new RegExp(patternNode.value, 'g');
+                outputNode.innerText = input.replaceAll(pattern, replacement);
+            } catch (error) {
+                messageNode.innerText = error.message;
+            }
+
+            patternHistory.save();
+            replacerHistory.save();
+            saveState();
+        }
+
+        replaceButton.addEventListener('click', (event) => update());
+
+        useButton.addEventListener('click', (event) => {
+            inputHistory.save();
+            inputHistory.content[0] = outputNode.innerText;
+            inputNode.value = outputNode.innerText;
+        });
+
+        clearButton.addEventListener('click', (event) => {
+            inputHistory.content.length = 1;
+            patternHistory.content.length = 1;
+            replacerHistory.content.length = 1;
+            saveState();
+        });
+
+        function saveState() {
+            const state = {
+                inputHistory: inputHistory.content,
+                patternHistory: patternHistory.content,
+                replacerHistory: replacerHistory.content,
+                output: outputNode.innerText,
+                live: liveNode.checked,
+            }
+            localStorage.setItem('text-replace-state', JSON.stringify(state));
+        }
+
+        function loadState() {
+            const savedState = localStorage.getItem('text-replace-state');
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                inputHistory.setContent(state.inputHistory);
+                patternHistory.setContent(state.patternHistory);
+                replacerHistory.setContent(state.replacerHistory);
+                outputNode.innerText = state.output;
+                liveNode.checked = state.live;
+
+                if (inputHistory.content.length === 1) {
+                    inputHistory.content.unshift(inputHistory.content[0]);
+                }
+                if (patternHistory.content.length === 1) {
+                    patternHistory.content.unshift(patternHistory.content[0]);
+                }
+                if (replacerHistory.content.length === 1) {
+                    replacerHistory.content.unshift(replacerHistory.content[0]);
+                }
+
+                inputNode.value = inputHistory.content[0] || '';
+                patternNode.value = patternHistory.content[0] || '';
+                replacerNode.value = replacerHistory.content[0] || '';
+
+                showMatches();
+            }
+        }
+
+        const historyControls = [
+            [inputHistory, inputNode, 'input-controls'],
+            [patternHistory, patternNode, 'pattern-controls'],
+            [replacerHistory, replacerNode, 'replacer-controls']];
+        historyControls.forEach((control) => {
+            const backButton = document.querySelector(`#${control[2]} .back`);
+            const forwardButton = document.querySelector(`#${control[2]} .forward`);
+
+            backButton.addEventListener('click', (event) => {
+                control[1].value = control[0].back();
+            });
+            forwardButton.addEventListener('click',
+                (event) => control[1].value = control[0].forward());
+
+            control[1].addEventListener('input', (event) => {
+                control[0].content[0] = control[1].value;
+                saveState();
+                showMatches();
+                if (liveNode.checked) {
+                    update();
+                }
+            });
+        });
+
+        window.addEventListener('load', (event) => loadState());
+    </script>
+</body>
+
+</html>
